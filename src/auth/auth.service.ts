@@ -73,34 +73,39 @@ export class AuthService {
 
   // **Login**
   async login(email: string, password: string, response: any): Promise<{ accessToken: string }> {
-    const user = await this.userRepository.findOne({ where: { email } });
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+    try {
+      const user = await this.userRepository.findOne({ where: { email } });
+      if (!user) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      // Generate Tokens
+      const payload = { id: user.id, email: user.email, role: user.role };
+      const accessToken = this.jwtService.sign(payload, { expiresIn: '1d' });
+      const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
+
+      user.refreshToken = refreshToken;
+      await this.userRepository.save(user);
+
+      response.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+
+      return { accessToken };
+    } catch (error) {
+      console.error('Login error:', error); // Xatolikni konsolga yozish
+      throw new UnauthorizedException('Login failed');
     }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    // Generate Tokens
-    const payload = { id: user.id, email: user.email, role: user.role };
-    const accessToken = this.jwtService.sign(payload, { expiresIn: '1d' });
-    const refreshToken = this.jwtService.sign(payload, { expiresIn: '7d' });
-
-    user.refreshToken = refreshToken;
-    await this.userRepository.save(user);
-
-    // Set refresh token in cookies
-    response.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    return { accessToken };
   }
+
 
   // **Logout**
   async logout(accessToken: string, response: any): Promise<{ message: string }> {
@@ -142,18 +147,31 @@ export class AuthService {
 
   // **Get Current User**
   async getMe(accessToken: string): Promise<Partial<User>> {
-    const payload = this.jwtService.verify(accessToken);
-    const user = await this.userRepository.findOne({ where: { id: payload.id } });
+    let payload;
+    try {
+      payload = this.jwtService.verify(accessToken);
+    } catch (error) {
+      console.error('Token verification error:', error);
+      throw new UnauthorizedException('Invalid or expired access token');
+    }
 
+    console.log('Payload:', payload);
+
+    const user = await this.userRepository.findOne({ where: { id: payload.id } });
     if (!user) {
+      console.error('User not found for ID:', payload.id);
       throw new UnauthorizedException('User not found');
     }
+
+    console.log('User found:', user);
 
     delete user.password;
     delete user.refreshToken;
 
     return user;
   }
+
+
 
   // **Get All Users (Admin Only)**
   async getAllUsers(role: User_Role): Promise<Partial<User[]>> {

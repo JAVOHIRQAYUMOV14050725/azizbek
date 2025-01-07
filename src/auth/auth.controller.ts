@@ -7,6 +7,7 @@ import {
   Res,
   UseGuards,
   Headers,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthGuard } from '../guards/auth.guard';
@@ -27,8 +28,10 @@ export class AuthController {
     @Body() body: { email: string; password: string },
     @Res() response: Response,
   ) {
-    return this.authService.login(body.email, body.password, response);
+    const loginResponse = await this.authService.login(body.email, body.password, response);
+    return response.send(loginResponse); 
   }
+
 
   @UseGuards(AuthGuard)
   @Post('logout')
@@ -50,7 +53,11 @@ export class AuthController {
   @UseGuards(AuthGuard)
   @Get('me')
   async getMe(@Headers('authorization') authorizationHeader: string) {
+    if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
+      throw new UnauthorizedException('Invalid or missing Authorization header');
+    }
     const accessToken = authorizationHeader.split(' ')[1];
     return this.authService.getMe(accessToken);
   }
+
 }
